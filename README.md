@@ -30,7 +30,7 @@ Create a reproducible environment using **Conda**:
 
 ```bash
 conda env create -f environment.yml
-conda activate rb2d
+conda activate thomas```
 
 
 ## 2. Download Datasets
