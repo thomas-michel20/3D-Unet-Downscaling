@@ -26,9 +26,7 @@ The datasets can be downloaded using:
 
 
 experiments/
-
 └── Download_Data/
-
     ├── Download_JHTDB_Data.py
     └── Download_MHD_data.ipynb
 
