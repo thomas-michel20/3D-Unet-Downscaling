@@ -10,20 +10,39 @@ from parameterized import parameterized
 
 
 def generate_test_data_heat_eqn():
-    in_vars = 'x, y, t'
-    out_vars = 'u, v'
-    eqn_strs = ['dif(u, t) - (dif(dif(u, x), x) + dif(dif(u, y), y))',
-                'dif(v, t) - (dif(dif(v, x), x) + dif(dif(v, y), y))']
-    eqn_names = ['diffusion_u', 'diffusion_v']
+    rayleigh = 1e6
+    prandtl = 1
+    t_crop=2. 
+    z_crop=1. 
+    x_crop=2.
+    y_crop = 2.
+    
+    P = (rayleigh * prandtl)**(-1/2)
+    R = (rayleigh / prandtl)**(-1/2)
+    nu = 1
+    in_vars = 't, x, y, z'
+    out_vars = 'p, u, v, w'
+    nt, nx, ny, nz = 1./t_crop, 1./x_crop, 1./y_crop, 1./z_crop
+
+    eqn_strs = [
+        f'{nt}*dif(u,t) - {nu}*(({nx})**2*dif(dif(u,x),x)+({ny})**2*dif(dif(u,y),y)+({nz})**2*dif(dif(u,z),z)) + dif(p,x) + (u*{nx}*dif(u,x)+v*{ny}*dif(u,y)+w*{nz}*dif(u,z))',
+        f'{nt}*dif(v,t) - {nu}*(({nx})**2*dif(dif(v,x),x)+({ny})**2*dif(dif(v,y),y)+({nz})**2*dif(dif(v,z),z)) + dif(p,y) + (u*{nx}*dif(v,x)+v*{ny}*dif(v,y)+w*{nz}*dif(v,z))',
+        f'{nt}*dif(w,t) - {nu}*(({nx})**2*dif(dif(w,x),x)+({ny})**2*dif(dif(w,y),y)+({nz})**2*dif(dif(w,z),z)) + dif(p,z) + (u*{nx}*dif(w,x)+v*{ny}*dif(w,y)+w*{nz}*dif(w,z))',
+        f'{nx}*dif(u,x) + {ny}*dif(v,y) + {nz}*dif(w,z)' # continuity
+    ]
+    eqn_names = ['transport_eqn_u', 'transport_eqn_v', 'transport_eqn_w', 'continuity']
 
     # arbitrary forward function, where inpt[0], inpt[1], inpt[2] correspond to x, y, t
     def fwd_fn(inpt):
-        u = inpt[..., 0:1]**2 + 3*inpt[..., 1:2]**2*inpt[..., 2:3] + inpt[..., 0:1]*inpt[..., 2:3]
-        v = inpt[..., 0:1]**2 + 3*inpt[..., 1:2]**2*inpt[..., 2:3] + inpt[..., 0:1]*inpt[..., 2:3]
-        return torch.cat([u, v], axis=-1)
+        t, x, y, z = inpt[..., 0:1], inpt[..., 1:2], inpt[..., 2:3], inpt[..., 3:4]
+        p = x + y + z + t
+        u = x**2 + y*t
+        v = y**2 + z*t
+        w = z**2 + x*t
+        return torch.cat([p, u, v, w], axis=-1)
 
     # input tensor
-    inpt = torch.tensor([[1., 2., 3.]])
+    inpt = torch.tensor([[1., 2., 3., 4.]])
     
     x, y, t = inpt[..., 0:1], inpt[..., 1:2], inpt[..., 2:3]
     g = x + 3*y**2 - 2 - 6*t

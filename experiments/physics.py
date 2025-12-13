@@ -62,3 +62,54 @@ def get_rb2_pde_layer(mean=None, std=None, t_crop=2., z_crop=1., x_crop=2., pran
         pde_layer.add_equation(eqn_str, eqn_name, subs_dict=subs_dict)
 
     return pde_layer  # NOTE: forward method has not yet been updated.
+
+def get_3d_pde_layer(mean=None, std=None, z_crop=1., y_crop=1., x_crop=1.):
+    """Get PDE layer corresponding to the 3D continuity equation.
+
+    Args:
+        mean: array of length 4 corresponding to the mean of the 4 physical channels, for normalizng
+        the equations. does not normalize if set to None (default).
+        std: array of length 4 corresponding to the std of the 4 physical channels, for normalizing
+        the equations. does not normalize if set to None (default).
+        t_crop: float, physical temporal span of crop.
+        z_crop: float, physical z-width of crop.
+        x_crop: float, physical x-width of crop.
+    """
+    # set up variables and equations
+    in_vars = 'x, y, z'
+    out_vars = 'p, u, v, w'
+    ny, nz, nx = 1./y_crop, 1./z_crop, 1./x_crop
+    eqn_strs = [
+        f'{nx} * dif(u, x) + {ny} * dif(v, y) + {nz} * dif(w, z)'
+    ]
+    # a name/identifier for the equations
+    eqn_names = ['continuity']
+
+    # normalize equations (optional) via change of variables.
+    if (mean is not None) or (std is not None):
+        # check the validity of mean and std
+        if not ((mean is not None) and (std is not None)):
+            raise ValueError('mean and std must either be both None, or both arrays of len 4.')
+        if not (hasattr(mean, '__len__') and hasattr(mean, '__len__')):
+            raise TypeError(("mean and std must be arrays of len 4. instead they are {} and {}"
+                             .format(type(mean), type(std))))
+        if not (len(mean) == 4 and len(std) == 4):
+            raise ValueError(
+                ("mean and std must be arrays of len 4. instead they are of len {} and {}"
+                 .format(len(mean), len(std))))
+        # substitute variables
+        subs_dict = {}
+        out_vars_list = [v.strip() for v in out_vars.split(',')]
+        for idx, var in enumerate(out_vars_list):
+            var_subs = f"{var}*{std[idx]}+{mean[idx]}"
+            subs_dict[var] = var_subs
+    else:
+        subs_dict = None
+
+    # initialize the pde layer
+    pde_layer = PDELayer(in_vars=in_vars, out_vars=out_vars)
+
+    for eqn_str, eqn_name in zip(eqn_strs, eqn_names):  # add equations
+        pde_layer.add_equation(eqn_str, eqn_name, subs_dict=subs_dict)
+
+    return pde_layer

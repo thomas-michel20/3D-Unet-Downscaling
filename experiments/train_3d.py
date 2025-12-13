@@ -5,6 +5,7 @@ import json
 import os
 from glob import glob
 import numpy as np
+import matplotlib.pyplot as plt
 from collections import defaultdict
 np.set_printoptions(precision=4)
 
@@ -24,7 +25,7 @@ from implicit_net import ImNet
 from local_implicit_grid import query_local_implicit_grid
 from nonlinearities import NONLINEARITIES
 import dataloader_spacetime as loader
-from physics import get_rb2_pde_layer
+from physics import get_rb2_pde_layer, get_3d_pde_layer
 
 # pylint: disable=no-member
 
@@ -53,7 +54,7 @@ def train(args, unet, imnet, train_loader, epoch, global_step, device,
         # send tensors to device
         
         data_tensors = [t.to(device) for t in data_tensors]
-        input_grid, point_coord, point_value = data_tensors
+        _, input_grid, point_coord, point_value = data_tensors
         optimizer.zero_grad()
         latent_grid = unet(input_grid)  # [batch, N, C, T, X, Y]
         # permute such that C is the last channel for local implicit grid query
@@ -82,7 +83,7 @@ def train(args, unet, imnet, train_loader, epoch, global_step, device,
 
         optimizer.step()
         tot_loss += loss.item()
-        count += input_grid.size()[0]
+        count += 1
         if batch_idx % args.log_interval == 0:
             # logger log
             logger.info(
@@ -104,84 +105,73 @@ def train(args, unet, imnet, train_loader, epoch, global_step, device,
     tot_loss /= count
     return tot_loss
 
-
 def eval(args, unet, imnet, eval_loader, epoch, global_step, device,
-         logger, writer, optimizer, pde_layer):
-    """Eval function. Used for evaluating entire slices and comparing to GT."""
+          logger, writer, optimizer, pde_layer):
+    """Training function."""
     unet.eval()
     imnet.eval()
-    phys_channels = ["p", "b", "u", "w"]
-    phys2id = dict(zip(phys_channels, range(len(phys_channels))))
+    tot_loss = 0
+    count = 0
     xmin = torch.zeros(3, dtype=torch.float32).to(device)
     xmax = torch.ones(3, dtype=torch.float32).to(device)
-    for data_tensors in eval_loader:
-        # only need the first batch
-        break
-    # send tensors to device
-    data_tensors = [t.to(device) for t in data_tensors]
-    hres_grid, lres_grid, _, _ = data_tensors
-    latent_grid = unet(lres_grid)  # [batch, C, T, Z, X]
-    nb, nc, nt, nz, nx = hres_grid.shape
+    loss_func = loss_functional(args.reg_loss_type)
+    for batch_idx, data_tensors in enumerate(eval_loader):
+        # send tensors to device
+        
+        data_tensors = [t.to(device) for t in data_tensors]
+        _, input_grid, point_coord, point_value = data_tensors
 
-    # permute such that C is the last channel for local implicit grid query
-    latent_grid = latent_grid.permute(0, 2, 3, 4, 1)  # [batch, T, Z, X, C]
+        latent_grid = unet(input_grid)  # [batch, N, C, T, X, Y]
+        # permute such that C is the last channel for local implicit grid query
+        latent_grid = latent_grid.permute(0, 2, 3, 4, 1)  # [batch, N, T, X, Y, C]
 
-    # define lambda function for pde_layer
-    fwd_fn = lambda points: query_local_implicit_grid(imnet, latent_grid, points, xmin, xmax)
+        # define lambda function for pde_layer
+        fwd_fn = lambda points: query_local_implicit_grid(imnet, latent_grid, points, xmin, xmax)
 
-    # update pde layer and compute predicted values + pde residues
-    pde_layer.update_forward_method(fwd_fn)
+        # update pde layer and compute predicted values + pde residues
+        pde_layer.update_forward_method(fwd_fn)
+        pred_value, residue_dict = pde_layer(point_coord, return_residue=True)
 
-    # layout query points for the desired slices
-    eps = 1e-6
-    t_seq = torch.linspace(eps, 1-eps, nt)[::int(nt/8)]  # temporal sequences
-    z_seq = torch.linspace(eps, 1-eps, nz)  # z sequences
-    x_seq = torch.linspace(eps, 1-eps, nx)  # x sequences
+        # function value regression loss
+        reg_loss = loss_func(pred_value, point_value)
 
-    query_coord = torch.stack(torch.meshgrid(t_seq, z_seq, x_seq), axis=-1)  # [nt, nz, nx, 3]
-    query_coord = query_coord.reshape([-1, 3]).to(device)  # [nt*nz*nx, 3]
-    n_query = query_coord.shape[0]
+        # pde residue loss
+        pde_tensors = torch.stack([d for d in residue_dict.values()], dim=0)
+        pde_loss = loss_func(pde_tensors, torch.zeros_like(pde_tensors))
+        loss = args.alpha_reg * reg_loss + args.alpha_pde * pde_loss
 
-    res_dict = defaultdict(list)
+        tot_loss += loss.item()
+        count += 1
+        global_step += 1
+        break # Only evaluate on 1 batch
+    tot_loss /= count
+    logger.info(f'Validation loss is = {tot_loss}')
+    return tot_loss
 
-    n_iters = int(np.ceil(n_query/args.pseudo_batch_size))
+def plot_losses(training_losses, evaluation_losses, epoch, save_path, logger, show=False):
+    # Basic validation
+    if len(training_losses) != epoch or len(evaluation_losses) != epoch:
+        raise ValueError("Loss lists must have length equal to 'epoch'.")
 
-    for idx in range(n_iters):
-        sid = idx * args.pseudo_batch_size
-        eid = min(sid+args.pseudo_batch_size, n_query)
-        query_coord_batch = query_coord[sid:eid]
-        query_coord_batch = query_coord_batch[None].expand(*(nb, eid-sid, 3))  # [nb, eid-sid, 3]
+    epoch_vec = range(epoch)
 
-        pred_value, residue_dict = pde_layer(query_coord_batch, return_residue=True)
-        pred_value = pred_value.detach()
-        for key in residue_dict.keys():
-            residue_dict[key] = residue_dict[key].detach()
-        for name, chan_id in zip(phys_channels, range(4)):
-            res_dict[name].append(pred_value[..., chan_id])  # [b, pb]
-        for name, val in residue_dict.items():
-            res_dict[name].append(val[..., 0])   # [b, pb]
+    plt.figure(figsize=(8, 5))
+    plt.plot(epoch_vec, training_losses, label="Training Loss", linewidth=2)
+    plt.plot(epoch_vec, evaluation_losses, label="Evaluation Loss", linewidth=2)
 
-    for key in res_dict.keys():
-        res_dict[key] = (torch.cat(res_dict[key], axis=1)
-                         .reshape([nb, len(t_seq), len(z_seq), len(x_seq)]))
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training vs Evaluation Loss")
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend()
 
-    # log the imgs sample-by-sample
-    for samp_id in range(nb):
-        for key in res_dict.keys():
-            field = res_dict[key][samp_id]  # [nt, nz, nx]
-            # add predicted slices
-            images = utils.batch_colorize_scalar_tensors(field)  # [nt, nz, nx, 3]
+    plt.tight_layout()
+    plt.savefig(save_path + '/Training_VS_Validation_Loss.png')
+    logger.info(f'Saved Training_VS_Validation_Loss.png to {save_path}')
+    if show:
+        plt.show()
 
-            writer.add_images('sample_{}/{}/predicted'.format(samp_id, key), images,
-                dataformats='NHWC', global_step=int(global_step))
-            # add ground truth slices (only for phys channels)
-            if key in phys_channels:
-                gt_fields = hres_grid[samp_id, phys2id[key], ::int(nt/8)]  # [nt, nz, nx]
-                gt_images = utils.batch_colorize_scalar_tensors(gt_fields)  # [nt, nz, nx, 3]
-
-                writer.add_images('sample_{}/{}/ground_truth'.format(samp_id, key), gt_images,
-                    dataformats='NHWC', global_step=int(global_step))
-
+    plt.close()
 
 def get_args():
     def str2bool(v):
@@ -208,7 +198,9 @@ def get_args():
                         help="disables CUDA training")
     parser.add_argument("--seed", type=int, default=1, metavar="S",
                         help="random seed (default: 1)")
-    parser.add_argument("--data_folder", type=str, default="./data",
+    parser.add_argument("--data_folder_training", type=str, default="./data",
+                        help="path to data folder (default: ./data)")
+    parser.add_argument("--data_folder_evaluation", type=str, default="./data",
                         help="path to data folder (default: ./data)")
     parser.add_argument("--train_data", type=str, default="rb2d_ra1e6_s42.npz",
                         help="name of training data (default: rb2d_ra1e6_s42.npz)")
@@ -220,12 +212,10 @@ def get_args():
     parser.add_argument("--optim", type=str, default="adam", choices=["adam", "sgd"])
     parser.add_argument("--resume", type=str, default=None,
                         help="path to checkpoint if resume is needed")
-    parser.add_argument("--nt", default=16, type=int, help="resolution of high res crop in t.")
+    parser.add_argument("--ny", default=128, type=int, help="resolution of high res crop in y.")
     parser.add_argument("--nx", default=128, type=int, help="resolution of high res crop in x.")
     parser.add_argument("--nz", default=128, type=int, help="resolution of high res crop in z.")
-    parser.add_argument("--downsamp_t", default=4, type=int,
-                        help="down sampling factor in t for low resolution crop.")
-    parser.add_argument("--downsamp_xz", default=8, type=int,
+    parser.add_argument("--downsamp_xyz", default=8, type=int,
                         help="down sampling factor in x and z for low resolution crop.")
     parser.add_argument("--n_samp_pts_per_crop", default=1024, type=int,
                         help="number of sample points to draw per crop.")
@@ -245,8 +235,8 @@ def get_args():
     parser.add_argument("--pseudo_batch_size", default=1024, type=int,
                         help="size of pseudo batch during eval.")
     parser.add_argument("--normalize_channels", dest='normalize_channels', action='store_true')
-    parser.add_argument("--no_normalize_channels", dest='normalize_channels', action='store_false')
     parser.set_defaults(normalize_channels=True)
+    parser.add_argument("--no_normalize_channels", dest='normalize_channels', action='store_false')
     parser.add_argument("--lr_scheduler", dest='lr_scheduler', action='store_true')
     parser.add_argument("--no_lr_scheduler", dest='lr_scheduler', action='store_false')
     parser.set_defaults(lr_scheduler=True)
@@ -258,14 +248,8 @@ def get_args():
     parser.add_argument("--lres_interp", default='linear', type=str,
                         help=("type of interpolation scheme for generating low res input data."
                               "choice of 'linear', 'nearest'"))
-    parser.add_argument('--rayleigh', type=float, required=True,
-                        help='Simulation Rayleigh number.')
-    parser.add_argument('--prandtl', type=float, required=True,
-                        help='Simulation Prandtl number.')
     parser.add_argument('--nonlin', type=str, default='leakyrelu', choices=list(NONLINEARITIES.keys()),
                         help='Nonlinear activations for continuous decoder.')
-    parser.add_argument('--use_continuity', type=str2bool, nargs='?', default=False, const=True,
-                        help='Whether to enforce continuity equation (mass conservation) or not')
 
     args = parser.parse_args()
     return args
@@ -278,12 +262,15 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     device = torch.device("cuda" if use_cuda else "cpu")
     # adjust batch size based on the number of gpus available
-    args.batch_size = int(torch.cuda.device_count()) * args.batch_size_per_gpu
+    if torch.cuda.device_count() > 0:
+        args.batch_size = torch.cuda.device_count() * args.batch_size_per_gpu
+    else:
+        args.batch_size = args.batch_size_per_gpu
 
     # log and create snapshots
     os.makedirs(args.log_dir, exist_ok=True)
-    filenames_to_snapshot = glob("*.py") + glob("*.sh")
-    utils.snapshot_files(filenames_to_snapshot, args.log_dir)
+    #filenames_to_snapshot = glob("*.py") + glob("*.sh")
+    #utils.snapshot_files(filenames_to_snapshot, args.log_dir)
     logger = utils.get_logger(log_dir=args.log_dir)
     with open(os.path.join(args.log_dir, "params.json"), 'w') as fh:
         json.dump(args.__dict__, fh, indent=2)
@@ -297,29 +284,32 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = loader.RB2DataLoader(
-        data_dir=args.data_folder, data_filename=args.train_data,
-        nx=args.nx, nz=args.nz, nt=args.nt, n_samp_pts_per_crop=args.n_samp_pts_per_crop,
-        downsamp_xz=args.downsamp_xz, downsamp_t=args.downsamp_t,
-        normalize_output=args.normalize_channels, return_hres=False,
+    trainset = loader.Spatial3D_DataLoader(
+        data_dir=args.data_folder_training, data_filename=args.train_data,
+        nx=args.nx, ny=args.ny, nz=args.nz,
+        n_samp_pts_per_crop=args.n_samp_pts_per_crop,
+        downsamp_xyz=args.downsamp_xyz,
+        normalize_output=args.normalize_channels, normalize_hres=True, return_hres=args.normalize_channels,
         lres_filter=args.lres_filter, lres_interp=args.lres_interp
     )
-    evalset = loader.RB2DataLoader(
-        data_dir=args.data_folder, data_filename=args.eval_data,
-        nx=args.nx, nz=args.nz, nt=args.nt, n_samp_pts_per_crop=args.n_samp_pts_per_crop,
-        downsamp_xz=args.downsamp_xz, downsamp_t=args.downsamp_t,
-        normalize_output=args.normalize_channels, return_hres=True,
-        lres_filter=args.lres_filter, lres_interp=args.lres_interp
+
+    
+    evalset = loader.Spatial3D_DataLoader(
+        data_dir=args.data_folder_evaluation, data_filename=args.eval_data,
+        nx=args.nx, ny=args.ny, nz=args.nz,
+        n_samp_pts_per_crop=args.n_samp_pts_per_crop,
+        downsamp_xyz=args.downsamp_xyz,
+        normalize_output=args.normalize_channels, normalize_hres=True, return_hres=args.normalize_channels,
+        lres_filter=args.lres_filter, lres_interp=args.lres_interp, trainset_mean=trainset._mean, trainset_std=trainset._std
     )
 
     train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_epoch_size)
-    eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.num_log_images)
+    eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_epoch_size)
 
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                               sampler=train_sampler, **kwargs)
-    eval_loader = DataLoader(evalset, batch_size=args.batch_size, shuffle=False, drop_last=False,
+    eval_loader = DataLoader(evalset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                              sampler=eval_sampler, **kwargs)
-
     # setup model
     unet = UNet3d(in_features=4, out_features=args.lat_dims, igres=trainset.scale_lres,
                   nf=args.unet_nf, mf=args.unet_mf)
@@ -330,11 +320,10 @@ def main():
     if args.optim == "sgd":
         optimizer = optim.SGD(all_model_params, lr=args.lr)
     else:
-        optimizer = optim.Adam(all_model_params, lr=args.lr)
+        optimizer = optim.Adam(all_model_params, lr=args.lr, weight_decay=1e-3)
 
     start_ep = 0
-    global_step = np.zeros(1, dtype=np.uint32)
-    tracked_stats = np.inf
+    global_step = int(0)
 
     if args.resume:
         resume_dict = torch.load(args.resume)
@@ -357,6 +346,8 @@ def main():
     model_param_count = lambda model: sum(x.numel() for x in model.parameters())
     logger.info("{}(unet) + {}(imnet) paramerters in total".format(model_param_count(unet),
                                                                    model_param_count(imnet)))
+    print(f'Unet parameters = {model_param_count(unet)}')
+    print(f'Imnet parameters = {model_param_count(imnet)}')
 
     checkpoint_path = os.path.join(args.log_dir, "checkpoint_latest.pth.tar")
 
@@ -366,26 +357,42 @@ def main():
         std = trainset.channel_std
     else:
         mean = std = None
-    pde_layer = get_rb2_pde_layer(mean=mean, std=std,
-        t_crop=args.nt*0.125, z_crop=args.nz*(1./128), x_crop=args.nx*(1./128), prandtl=args.prandtl, rayleigh=args.rayleigh,
-        use_continuity=args.use_continuity)
+
+    pde_layer = get_3d_pde_layer(mean=mean, std=std, z_crop=1., y_crop=1., x_crop=1.)
 
     if args.lr_scheduler:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
-
+    
     # training loop
+    patience = 30
+    epochs_no_improve = 0 
+    
+    evaluation_losses = []
+    training_losses = []
+
+    tracked_stats = eval(args, unet, imnet, eval_loader, 0, global_step, device,logger, writer, optimizer, pde_layer)
+    logger.info(f'This loss is on training set ↓')
+    training_loss = eval(args, unet, imnet, train_loader, 0, global_step, device,logger, writer, optimizer, pde_layer)
+    
+    training_losses.append(training_loss)
+    evaluation_losses.append(tracked_stats)
     for epoch in range(start_ep + 1, args.epochs + 1):
-        loss = train(args, unet, imnet, train_loader, epoch, global_step, device, logger, writer,
+        training_loss = train(args, unet, imnet, train_loader, epoch, global_step, device, logger, writer,
                      optimizer, pde_layer)
-        eval(args, unet, imnet, eval_loader, epoch, global_step, device, logger, writer, optimizer,
-            pde_layer)
+        evaluation_loss = eval(args, unet, imnet, eval_loader, epoch, global_step, device,logger, writer, optimizer, pde_layer)
+        training_losses.append(training_loss)
+        evaluation_losses.append(evaluation_loss)
+        
         if args.lr_scheduler:
-            scheduler.step(loss)
-        if loss < tracked_stats:
-            tracked_stats = loss
+            scheduler.step(evaluation_loss)
+
+        if evaluation_loss < tracked_stats:
+            tracked_stats = evaluation_loss
             is_best = True
+            epochs_no_improve = 0
         else:
             is_best = False
+            epochs_no_improve += 1
 
         utils.save_checkpoint({
             "epoch": epoch,
@@ -396,5 +403,8 @@ def main():
             "global_step": global_step,
         }, is_best, epoch, checkpoint_path, "_pdenet", logger)
 
+        if epochs_no_improve > patience:
+            break
+    plot_losses(training_losses, evaluation_losses, len(training_losses), args.log_dir, logger, show=False)
 if __name__ == "__main__":
     main()
