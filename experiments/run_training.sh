@@ -6,7 +6,7 @@
 #SBATCH --partition=gpu                 # Partition (adjust to your cluster)
 #SBATCH --gres=gpu:2                    # Request 1 GPU
 #SBATCH --cpus-per-task=4               # CPU cores per task
-#SBATCH --mem=128G                       # Memory per node
+#SBATCH --mem=32G                       # Memory per node
 
 # Activate conda
 source ~/miniconda/etc/profile.d/conda.sh

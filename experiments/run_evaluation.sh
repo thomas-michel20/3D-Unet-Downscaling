@@ -12,7 +12,7 @@
 source ~/miniconda/etc/profile.d/conda.sh
 conda activate thomas
 
-save_dir_name="./model_ABL_square_res_32_eval"
+save_dir_name="./model_eval"
 mkdir -p $save_dir_name
 #eval_results_16_alpha=0_0
 #3d_isotropic_validation_16_0_2.npz
@@ -20,17 +20,17 @@ mkdir -p $save_dir_name
 
 python evaluation_3d.py \
   --eval_downsamp_xyz 2 \
-  --ckpt ./model_ABL_square_res_32/checkpoint_latest.pth.tar_pdenet_best.pth.tar \
-  --data_folder_training ./data/ABL_Data_Training \
-  --data_folder_evaluation ./data/ABL_Data_Evaluation \
-  --train_data none \
-  --eval_data none  \
+  --ckpt ./model_dir/checkpoint_latest.pth.tar_pdenet_best.pth.tar \
+  --data_folder_training '' \
+  --data_folder_evaluation '' \
+  --train_data ./data/MHD_64_train.npz \
+  --eval_data ./data/MHD_64_val.npz  \
   --save_path $save_dir_name \
   --lres_interp linear \
   --lres_filter none \
-  --eval_xres 32 \
-  --eval_yres 32 \
-  --eval_zres 32 \
+  --eval_xres 64 \
+  --eval_yres 64 \
+  --eval_zres 64 \
   --frame_rate 1 \
   --nbr_val_samples 20 \
   --eval_pseudo_batch_size 1000 \
