@@ -30,7 +30,8 @@ Create a reproducible environment using **Conda**:
 
 ```bash
 conda env create -f environment.yml
-conda activate thomas```
+conda activate thomas
+```
 
 
 ## 2️⃣ Download Datasets
