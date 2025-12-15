@@ -1,4 +1,4 @@
-# 🚀 3D U-Net Super-Resolution Model
+# 3D U-Net Super-Resolution Model
 
 This repository is based on a **fork** of the work by **Jiang, Chiyu Max, Soheil Esmaeilzadeh, Kamyar Azizzadenesheli, et al. (2020)**, corresponding to the paper:  
 
@@ -15,12 +15,16 @@ The **report** for this project, containing context, results, and discussion, is
 
 This README explains:
 
-- ✅ How to install the environment  
-- ✅ How to download the datasets used in the report  
-- ✅ How to train a 3D super-resolution model  
-- ✅ How to evaluate the model  
+- 1️⃣ How to install the environment  
+- 2️⃣ How to download the datasets used in the report  
+- 3️⃣ How to train a 3D super-resolution model  
+- 4️⃣ How to evaluate the model  
 
-All tasks are performed in the `experiments/` folder. You **should not need to modify the `src/` folder**.
+## 📎 Notes
+- All experiments are launched from the ```experiments/``` directory.
+- The ```src/``` directory contains the core implementation and typically does not require modification.
+- Refer to report.pdf for detailed explanations of datasets, metrics, and results.
+
 
 ---
 
@@ -40,34 +44,35 @@ used in the report.
 
 The datasets can be downloaded using:
 
-
+```
 experiments/
 └── Download_Data/
     ├── Download_JHTDB_Data.py
     └── Download_MHD_data.ipynb
-
+```
 ⚠️ **Note:** Access to the JHTDB database requires prior authorization.
 
-For the ABL dataset, you can only copy it from another folder and then merge it using consecutively:
-
+For the ***ABL*** dataset, you can only copy it from another folder and then merge it using:
+```
 experiments/
 └── Download_Data/
     ├── Copy_ABL_Data.py
     └── Merge_ABL_Data.py
-
+```
+⚠️ **Note:** This will create four ```.npy``` files for each variables, stored in a directory. The code can also take this format as input, but you need to specify the args ```--data_folder_training``` and 
+  ```--data_folder_evaluation``` instead of ```--train_data ./data/MHD_64_train.npz``` and ```--eval_data ./data/MHD_64_val.npz``` in the training and evaluation script.
 ## 3️⃣ Train a model
 To train the model, run:
+
 ```./run_training.sh```
 
-Hyperparameters can be configured directly inside the run_training.sh script.
+This will create a new directory with the model weights and a plot of the losses curves. Hyperparameters can be configured directly inside the script.
 Training and evaluation are designed to run on an ***HPC cluster using Slurm***.
-All logs and outputs are saved in the logs/ directory.
+All logs and printed outputs are saved in the ```logs/``` directory. 
 
 ## 4️⃣ Model Evaluation
 To evaluate a trained model, run:
-```./run_evaluation.sh```.
 
-## 📎 Notes
-- All experiments are launched from the ```experiments/``` directory.
-- The ```src/``` directory contains the core implementation and typically does not require modification.
-- Refer to report.pdf for detailed explanations of datasets, metrics, and results.
+```./run_evaluation.sh```
+
+This will create a new directory with the evaluation metrics and images of an example. All logs and printed outputs are saved in the ```logs/``` directory. 
