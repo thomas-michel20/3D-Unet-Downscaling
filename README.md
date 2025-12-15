@@ -33,7 +33,7 @@ conda env create -f environment.yml
 conda activate thomas```
 
 
-## 2. Download Datasets
+## 2️⃣ Download Datasets
 To train the model, you need a training and an evaluation dataset in the ```.npz``` format with physical variables (for example $p$, $u$, $v$ and $w$), each of them of shape $\left(n_t, n_x, n_y, n_z \right)$. This is the case for the **3D isotropic turbulence dataset** and the **MHD dataset**
 used in the report.
 
@@ -54,8 +54,19 @@ experiments/
     ├── Copy_ABL_Data.py
     └── Merge_ABL_Data.py
 
-## 3. Train a model
-To train the model, you should run the training script ```run_training.sh```. In this ```.sh``` you can tune the various hyper-parameters of the model. The training and evaluation are done using a HPC cluster and Slurm. The logs are stored in `logs` folder.
+## 3️⃣ Train a model
+To train the model, run:
+```./run_training.sh```
 
-## 4. Evaluation of a model
-To evaluate the model, you should run the evaluation script ```run_evaluation.sh```. 
+Hyperparameters can be configured directly inside the run_training.sh script.
+Training and evaluation are designed to run on an ***HPC cluster using Slurm***.
+All logs and outputs are saved in the logs/ directory.
+
+## 4️⃣ Model Evaluation
+To evaluate a trained model, run:
+```./run_evaluation.sh```.
+
+## 📎 Notes
+- All experiments are launched from the ```experiments/``` directory.
+- The ```src/``` directory contains the core implementation and typically does not require modification.
+- Refer to report.pdf for detailed explanations of datasets, metrics, and results.
