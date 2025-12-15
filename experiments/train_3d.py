@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 # import our modules
 import sys
-sys.path.append("../../src")
+sys.path.append("../src")
 import train_utils as utils
 from unet3d import UNet3d
 from implicit_net import ImNet
