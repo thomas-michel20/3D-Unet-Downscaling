@@ -14,7 +14,7 @@ import os
 import pyvista as pv
 # import our modules
 import sys
-sys.path.append("../../src")
+sys.path.append("../src")
 from unet3d import UNet3d
 from implicit_net import ImNet
 from pde import PDELayer
