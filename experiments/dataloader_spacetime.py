@@ -158,7 +158,7 @@ class Spatial3D_DataLoader(Dataset):
                                 y_id:y_id+self.ny_hres,
                                 x_id:x_id+self.nx_hres]  # [C, Z, Y, X]
         
-        # Data augmentation
+        # Data augmentation (desactivate if data is not symmetric)
         if np.random.rand() < 0.5:
             space_time_crop_hres = np.flip(space_time_crop_hres, axis=1).copy()  # flip Z
         if np.random.rand() < 0.5:
