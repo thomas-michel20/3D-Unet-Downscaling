@@ -59,7 +59,7 @@ experiments/
     ├── Copy_ABL_Data.py
     └── Merge_ABL_Data.py
 ```
-⚠️ **Note:** This will create four ```.npy``` files for each variables, stored in a directory. The code can also take this format as input, but you need to specify the args ```--data_folder_training``` and 
+⚠️ **Note:** This will create four ```.npy``` files (one for each variables), stored in a directory. The code can also take this format as input, but you need to specify the args ```--data_folder_training``` and 
   ```--data_folder_evaluation``` instead of ```--train_data``` and ```--eval_data``` in the training and evaluation script.
 ## 3️⃣ Train a model
 To train the model, run:
