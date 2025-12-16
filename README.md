@@ -75,4 +75,4 @@ To evaluate a trained model, run:
 
 ```./run_evaluation.sh```
 
-This will create a new directory with the evaluation metrics and images of an example. All logs and printed outputs are saved in the ```logs/``` directory. 
+This will create a new directory with the evaluation metrics compared to an interpolation baseline and some 3D examples of an inference. All logs and printed outputs are saved in the ```logs/``` directory. 
