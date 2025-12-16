@@ -14,9 +14,6 @@ conda activate thomas
 
 save_dir_name="./model_eval"
 mkdir -p $save_dir_name
-#eval_results_16_alpha=0_0
-#3d_isotropic_validation_16_0_2.npz
-#'training_3d_16_alpha=0.0'
 
 python evaluation_3d.py \
   --eval_downsamp_xyz 2 \
