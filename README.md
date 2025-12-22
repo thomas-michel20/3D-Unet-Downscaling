@@ -24,6 +24,7 @@ This README explains:
 - All experiments are launched from the ```experiments/``` directory.
 - The ```src/``` directory contains the core implementation and typically does not require modification.
 - Refer to report.pdf for detailed explanations of datasets, metrics, and results.
+- For members of the WIRE (Wind Engineering and Renewable Energy Laboratory) of EPFL, data files can be found under `/work/wire/guest/3D-Unet-Data`.
 
 
 ---
